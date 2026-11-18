@@ -9,7 +9,7 @@ The project comes in two versions:
 | **Web** (runs in any browser) | WebGL (OpenGL ES) + JavaScript | [`index.html`](index.html) |
 | **Desktop** | C++ with OpenGL and GLUT / FreeGLUT | [`opengl-cpp/`](opengl-cpp/) |
 
-**Live demo:** _add your Vercel link here after deploying_
+**Live demo:** https://traffic-signal-simulation-azure.vercel.app
 
 ---
 

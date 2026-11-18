@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traffic Signal Simulation (WebGL)</title>
+<style>
+  :root {
+    --bg: #0f1218; --panel: #181d26; --line: #2a3140; --text: #e6e9ef; --muted: #8b93a3;
+    --green: #22c55e; --yellow: #facc15; --red: #ef4444; --accent: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header { padding: 16px 20px 8px; }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .layout {
+    display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px;
+    padding: 12px 20px 20px; align-items: start;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+  canvas { display: block; width: 100%; aspect-ratio: 1000 / 600; cursor: default; }
+  .countdown {
+    position: absolute; transform: translate(-50%, 0);
+    font: 700 16px/1 ui-monospace, Menlo, Consolas, monospace; color: #fff;
+    background: rgba(0,0,0,.55); padding: 3px 7px; border-radius: 6px; pointer-events: none;
+  }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; }
+  .section + .section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+  .status { display: flex; align-items: center; gap: 12px; }
+  .lamp { display: flex; flex-direction: column; gap: 5px; background: #0a0c10; padding: 7px; border-radius: 10px; }
+  .lamp span { width: 18px; height: 18px; border-radius: 50%; opacity: .18; transition: opacity .2s, box-shadow .2s; }
+  .lamp .r { background: var(--red); } .lamp .y { background: var(--yellow); } .lamp .g { background: var(--green); }
+  .lamp span.on { opacity: 1; box-shadow: 0 0 12px currentColor; }
+  .lamp .r.on { color: var(--red); } .lamp .y.on { color: var(--yellow); } .lamp .g.on { color: var(--green); }
+  .status-text b { font-size: 22px; display: block; }
+  .status-text small { color: var(--muted); }
+
+  .btn-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .btn-row.two { grid-template-columns: repeat(2, 1fr); }
+  button {
+    font: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+    background: #232a37; border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 6px; cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #2c3546; }
+  button.active { border-color: var(--accent); background: #1e3350; }
+  button.g { border-left: 4px solid var(--green); }
+  button.y { border-left: 4px solid var(--yellow); }
+  button.r { border-left: 4px solid var(--red); }
+  button.wide { grid-column: 1 / -1; }
+
+  label.slider { display: block; font-size: 13px; margin-bottom: 10px; }
+  label.slider span { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { background: #12161d; border-radius: 8px; padding: 8px; text-align: center; }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat small { color: var(--muted); font-size: 11px; }
+
+  .keys { font-size: 12px; color: var(--muted); line-height: 1.8; }
+  kbd {
+    font: 600 11px ui-monospace, Menlo, Consolas, monospace; color: var(--text);
+    background: #232a37; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚦 Traffic Signal Simulation</h1>
+  <p>Computer graphics project, rendered with WebGL (OpenGL ES in the browser)</p>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="stage">
+      <canvas id="gl"></canvas>
+      <div class="countdown" id="countdown">6</div>
+    </div>
+    <div class="hint">Tip: click the traffic light in the scene to switch it to the next colour.</div>
+  </div>
+
+  <aside class="panel">
+    <div class="section">
+      <h2>Signal</h2>
+      <div class="status">
+        <div class="lamp"><span class="r" id="lr"></span><span class="y" id="ly"></span><span class="g" id="lg"></span></div>
+        <div class="status-text"><b id="lightName">GREEN</b><small id="modeName">Automatic mode</small></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Control</h2>
+      <div class="btn-row">
+        <button class="g" data-light="0">Green</button>
+        <button class="y" data-light="1">Yellow</button>
+        <button class="r" data-light="2">Red</button>
+      </div>
+      <div class="btn-row two" style="margin-top:8px">
+        <button id="autoBtn" class="active">Auto</button>
+        <button id="manualBtn">Manual</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Timing (auto mode)</h2>
+      <label class="slider">Green duration <span id="vg">6 s</span>
+        <input type="range" id="dg" min="2" max="15" value="6"></label>
+      <label class="slider">Yellow duration <span id="vy">2 s</span>
+        <input type="range" id="dy" min="1" max="5" value="2"></label>
+      <label class="slider">Red duration <span id="vr">5 s</span>
+        <input type="range" id="dr" min="2" max="15" value="5"></label>
+    </div>
+
+    <div class="section">
+      <h2>Simulation</h2>
+      <label class="slider">Speed <span id="vs">1.0×</span>
+        <input type="range" id="speed" min="0.5" max="4" step="0.5" value="1"></label>
+      <label class="slider">Traffic density <span id="vd">Medium</span>
+        <input type="range" id="density" min="1" max="3" step="1" value="2"></label>
+      <div class="btn-row">
+        <button id="addBtn">+ Car</button>
+        <button id="nightBtn">Night</button>
+        <button id="pauseBtn">Pause</button>
+      </div>
+      <div class="btn-row" style="margin-top:8px"><button id="resetBtn" class="wide">Reset</button></div>
+    </div>
+
+    <div class="section">
+      <h2>Statistics</h2>
+      <div class="stats">
+        <div class="stat"><b id="sOnRoad">0</b><small>On road</small></div>
+        <div class="stat"><b id="sWaiting">0</b><small>Waiting</small></div>
+        <div class="stat"><b id="sPassed">0</b><small>Passed</small></div>
+      </div>
+    </div>
+
+    <div class="section keys">
+      <h2>Keyboard</h2>
+      <kbd>G</kbd> <kbd>Y</kbd> <kbd>R</kbd> set light &nbsp; <kbd>A</kbd> auto<br>
+      <kbd>N</kbd> add car &nbsp; <kbd>+</kbd> <kbd>-</kbd> speed<br>
+      <kbd>D</kbd> day / night &nbsp; <kbd>P</kbd> pause
+    </div>
+  </aside>
+</div>
+
+<script>
+// ============================================================
+//  WebGL setup: a tiny immediate-mode renderer (like glBegin/glEnd)
+//  World coordinates: x 0..1000, y 0..600 (same as gluOrtho2D)
+// ============================================================
+const W = 1000, H = 600;
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl', { antialias: true });
+
+const VS = `
+attribute vec2 aPos; attribute vec4 aCol; varying vec4 vCol;
+void main() {
+  gl_Position = vec4(aPos.x / ${W / 2}.0 - 1.0, aPos.y / ${H / 2}.0 - 1.0, 0.0, 1.0);
+  vCol = aCol;
+}`;
+const FS = `precision mediump float; varying vec4 vCol; void main() { gl_FragColor = vCol; }`;
+
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog); gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+const aPos = gl.getAttribLocation(prog, 'aPos'), aCol = gl.getAttribLocation(prog, 'aCol');
+gl.enableVertexAttribArray(aPos); gl.enableVertexAttribArray(aCol);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 24, 0);
+gl.vertexAttribPointer(aCol, 4, gl.FLOAT, false, 24, 8);
+gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+let verts = [];
+let col = [1, 1, 1, 1];
+const color = (r, g, b, a = 1) => { col = [r, g, b, a]; };
+const v = (x, y) => verts.push(x, y, col[0], col[1], col[2], col[3]);
+function tri(x1, y1, x2, y2, x3, y3) { v(x1, y1); v(x2, y2); v(x3, y3); }
+function rect(x, y, w, h) { tri(x, y, x + w, y, x + w, y + h); tri(x, y, x + w, y + h, x, y + h); }
+function poly(pts) { for (let i = 1; i < pts.length - 1; i++) tri(pts[0][0], pts[0][1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]); }
+function circle(cx, cy, r, seg = 28) {
+  for (let i = 0; i < seg; i++) {
+    const a1 = 2 * Math.PI * i / seg, a2 = 2 * Math.PI * (i + 1) / seg;
+    tri(cx, cy, cx + r * Math.cos(a1), cy + r * Math.sin(a1), cx + r * Math.cos(a2), cy + r * Math.sin(a2));
+  }
+}
+function gradRect(x, y, w, h, top, bottom) {   // vertical gradient
+  const T = [...top, 1], B = [...bottom, 1];
+  const p = (px, py, c) => verts.push(px, py, ...c);
+  p(x, y, B); p(x + w, y, B); p(x + w, y + h, T);
+  p(x, y, B); p(x + w, y + h, T); p(x, y + h, T);
+}
+function flush() {
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+  gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
+  verts = [];
+}
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+
+// ============================================================
+//  Simulation state
+// ============================================================
+const STOP_LINE = 600, LANE_Y = [150, 230];
+const SIGNAL_X = STOP_LINE + 70;
+const GREEN = 0, YELLOW = 1, RED = 2;
+const NAMES = ['GREEN', 'YELLOW', 'RED'];
+const duration = [6, 2, 5];
+
+let light = GREEN, lightTimer = 0, autoMode = true;
+let paused = false, night = false, speedScale = 1, density = 2;
+let spawnTimer = 0, cloudX = 0, carsPassed = 0;
+let cars = [];
+
+const stars = Array.from({ length: 90 }, () => [Math.random() * W, 320 + Math.random() * 280, Math.random()]);
+const buildings = [[30, 150], [140, 220], [260, 120], [380, 180], [700, 200], [820, 140], [920, 170]];
+const CAR_COLORS = [[0.9,0.2,0.2],[0.2,0.45,0.9],[0.95,0.75,0.1],[0.15,0.7,0.4],[0.95,0.95,0.95],[0.55,0.3,0.8],[0.95,0.5,0.15],[0.2,0.2,0.25]];
+
+function addCar(lane) {
+  if (lane === undefined) lane = Math.random() < 0.5 ? 0 : 1;
+  if (cars.some(c => c.lane === lane && c.x < 20)) return;   // no space at entry
+  const length = 80 + Math.random() * 30;
+  const maxSpeed = 2 + Math.random() * 2;
+  const isTruck = Math.random() < 0.15;
+  cars.push({
+    x: -length - 10, lane, length: isTruck ? 130 : length, speed: maxSpeed,
+    maxSpeed: isTruck ? 1.8 : maxSpeed, color: CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)],
+    truck: isTruck, counted: false, wheel: 0
+  });
+}
+
+function setLight(l) { light = l; lightTimer = 0; }
+function nextLight() { setLight((light + 1) % 3); }
+
+function updateCars(f) {
+  for (let lane = 0; lane < 2; lane++) {
+    const laneCars = cars.filter(c => c.lane === lane).sort((a, b) => b.x - a.x);
+    laneCars.forEach((c, i) => {
+      const front = c.x + c.length;
+      let limit = Infinity;
+      // 1. obey the signal
+      const distToLine = STOP_LINE - front;
+      if (light !== GREEN && distToLine >= -2) {
+        const tooClose = light === YELLOW && distToLine < 25;  // can't stop safely: go
+        if (!tooClose) limit = STOP_LINE - 3;
+      }
+      // 2. keep a safe gap to the car ahead
+      if (i > 0) limit = Math.min(limit, laneCars[i - 1].x - 18);
+
+      const gap = limit - front;
+      let target = c.maxSpeed;
+      if (gap < 120) target = Math.max(0, Math.min(c.maxSpeed, gap * 0.06));
+      c.speed = c.speed < target ? Math.min(target, c.speed + 0.08 * f) : target;
+      if (gap < 0.5) c.speed = 0;
+
+      c.x += c.speed * speedScale * f;
+      c.wheel += c.speed * speedScale * f * 0.12;
+      if (!c.counted && c.x > STOP_LINE) { c.counted = true; carsPassed++; }
+    });
+  }
+  cars = cars.filter(c => c.x < W + 20);
+}
+
+// ============================================================
+//  Drawing the scene
+// ============================================================
+function drawSky() {
+  if (night) gradRect(0, 300, W, 300, [0.02, 0.02, 0.12], [0.10, 0.10, 0.25]);
+  else gradRect(0, 300, W, 300, [0.35, 0.65, 0.95], [0.75, 0.90, 1.0]);
+
+  if (night) {
+    for (const [x, y, t] of stars) {
+      const tw = 0.5 + 0.5 * Math.sin(performance.now() / 500 + t * 10);
+      color(1, 1, 1, 0.4 + 0.6 * tw); rect(x, y, 2, 2);
+    }
+    color(0.95, 0.95, 0.85); circle(850, 520, 35);
+    color(0.03, 0.03, 0.14); circle(866, 530, 30);
+  } else {
+    color(1, 0.9, 0.2, 0.25); circle(850, 520, 58);
+    color(1, 0.9, 0.2); circle(850, 520, 40);
+    color(1, 1, 1, 0.95);
+    for (let i = 0; i < 3; i++) {
+      const cx = ((cloudX + i * 380) % (W + 200)) - 100, cy = 480 + (i % 2) * 40;
+      circle(cx, cy, 25); circle(cx + 25, cy + 12, 30); circle(cx + 55, cy, 25);
+    }
+  }
+}
+
+function drawBuildings() {
+  buildings.forEach(([x, h], i) => {
+    const s = 0.45 + 0.05 * (i % 3);
+    if (night) color(s * 0.3, s * 0.3, s * 0.4); else color(s, s * 0.9, s * 0.8);
+    rect(x, 300, 90, h);
+    for (let wy = 315; wy < 300 + h - 25; wy += 30)
+      for (let wx = x + 12; wx < x + 80; wx += 25) {
+        const lit = ((wx * 7 + wy * 3) % 5) > 1;
+        if (night) color(lit ? 1 : 0.15, lit ? 0.9 : 0.15, lit ? 0.4 : 0.2); else color(0.7, 0.85, 0.95);
+        rect(wx, wy, 14, 18);
+      }
+  });
+}
+
+function drawRoad() {
+  if (night) color(0.05, 0.25, 0.05); else color(0.2, 0.65, 0.2);
+  rect(0, 0, W, 110);
+  color(0.6, 0.6, 0.6); rect(0, 280, W, 20); rect(0, 110, W, 15);
+  color(0.18, 0.18, 0.18); rect(0, 125, W, 155);
+  color(1, 1, 1);
+  for (let x = 0; x < W; x += 60) rect(x, 200, 35, 5);
+  for (let y = 130; y < 275; y += 20) rect(STOP_LINE + 15, y, 45, 10);
+  rect(STOP_LINE - 4, 125, 6, 155);
+  // street lamps
+  for (const lx of [150, 420, 880]) {
+    color(0.3, 0.3, 0.3); rect(lx, 300, 6, 110); rect(lx, 404, 30, 5);
+    if (night) { color(1, 0.9, 0.5, 0.18); poly([[lx + 28, 402], [lx + 70, 300], [lx - 10, 300]]); }
+    color(night ? 1 : 0.85, night ? 0.9 : 0.85, night ? 0.5 : 0.8); circle(lx + 28, 402, 6);
+  }
+  // trees on the grass
+  for (const tx of [60, 260, 480, 760, 940]) {
+    color(0.4, 0.25, 0.1); rect(tx, 40, 10, 35);
+    if (night) color(0.05, 0.3, 0.1); else color(0.1, 0.5, 0.15);
+    circle(tx + 5, 85, 24); circle(tx - 10, 72, 16); circle(tx + 20, 72, 16);
+  }
+}
+
+function drawTrafficLight() {
+  const px = SIGNAL_X, py = 300;
+  color(0.25, 0.25, 0.25); rect(px, py, 10, 150);
+  color(0.1, 0.1, 0.1); rect(px - 20, py + 150, 50, 130);
+  const cy = [py + 175, py + 215, py + 255];        // green, yellow, red
+  const on = [[0, 1, 0.2], [1, 0.85, 0], [1, 0.1, 0.1]];
+  for (let i = 0; i < 3; i++) {
+    if (i === light) {
+      color(...on[i], 0.18); circle(px + 5, cy[i], 34);
+      color(...on[i], 0.35); circle(px + 5, cy[i], 24);
+      color(...on[i]);
+    } else color(on[i][0] * 0.25, on[i][1] * 0.25, on[i][2] * 0.25);
+    circle(px + 5, cy[i], 15);
+  }
+}
+
+function drawCar(c) {
+  const x = c.x, y = LANE_Y[c.lane] - 25, L = c.length;
+  const [r, g, b] = c.color;
+  color(0, 0, 0, 0.35); rect(x + 3, y - 4, L, 6);                // shadow
+
+  if (c.truck) {
+    color(r * 0.8, g * 0.8, b * 0.8); rect(x, y + 5, L * 0.72, 48);  // cargo box
+    color(r, g, b); rect(x + L * 0.74, y + 5, L * 0.26, 34);         // cab
+    color(0.75, 0.9, 1); rect(x + L * 0.80, y + 22, L * 0.16, 13);
+  } else {
+    color(r, g, b); rect(x, y + 5, L, 22);
+    poly([[x + L * .20, y + 27], [x + L * .80, y + 27], [x + L * .68, y + 45], [x + L * .30, y + 45]]);
+    color(0.75, 0.9, 1);
+    poly([[x + L * .26, y + 29], [x + L * .48, y + 29], [x + L * .48, y + 42], [x + L * .32, y + 42]]);
+    poly([[x + L * .52, y + 29], [x + L * .74, y + 29], [x + L * .66, y + 42], [x + L * .52, y + 42]]);
+  }
+  if (night) { color(1, 1, 0.6, 0.22); tri(x + L, y + 18, x + L + 95, y + 38, x + L + 95, y - 2); }
+  color(1, 1, 0.6); rect(x + L - 5, y + 15, 5, 7);
+  const braking = c.speed < c.maxSpeed * 0.5;
+  if (braking) { color(1, 0, 0, 0.35); circle(x + 2, y + 18, 9); color(1, 0.1, 0.1); }
+  else color(0.5, 0, 0);
+  rect(x, y + 15, 5, 7);
+
+  for (const wx of [x + L * 0.22, x + L * 0.78]) {               // rotating wheels
+    color(0.05, 0.05, 0.05); circle(wx, y + 5, 9);
+    color(0.7, 0.7, 0.7); circle(wx, y + 5, 4);
+    color(0.3, 0.3, 0.3);
+    const a = -c.wheel;
+    tri(wx, y + 5, wx + 7 * Math.cos(a), y + 5 + 7 * Math.sin(a), wx + 7 * Math.cos(a + 0.4), y + 5 + 7 * Math.sin(a + 0.4));
+  }
+}
+
+function render() {
+  resize();
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  drawSky(); drawBuildings(); drawRoad();
+  cars.filter(c => c.lane === 1).forEach(drawCar);   // far lane first
+  cars.filter(c => c.lane === 0).forEach(drawCar);
+  drawTrafficLight();
+  if (night) { color(0, 0, 0.05, 0.15); rect(0, 0, W, H); }
+  flush();
+}
+
+// ============================================================
+//  UI
+// ============================================================
+const $ = id => document.getElementById(id);
+const countdown = $('countdown');
+countdown.style.left = ((SIGNAL_X - 50) / W * 100) + '%';   // just left of the signal housing
+countdown.style.top = ((H - 525) / H * 100) + '%';
+
+function updateUI() {
+  ['lg', 'ly', 'lr'].forEach((id, i) => $(id).classList.toggle('on', i === light));
+  $('lightName').textContent = NAMES[light];
+  $('lightName').style.color = ['var(--green)', 'var(--yellow)', 'var(--red)'][light];
+  $('modeName').textContent = (autoMode ? 'Automatic' : 'Manual') + ' mode' + (paused ? ' · paused' : '');
+  $('autoBtn').classList.toggle('active', autoMode);
+  $('manualBtn').classList.toggle('active', !autoMode);
+  document.querySelectorAll('[data-light]').forEach(b => b.classList.toggle('active', +b.dataset.light === light && !autoMode));
+  countdown.style.display = autoMode ? 'block' : 'none';
+  countdown.textContent = Math.max(1, Math.ceil(duration[light] - lightTimer));
+  $('sOnRoad').textContent = cars.length;
+  $('sWaiting').textContent = cars.filter(c => c.speed < 0.2).length;
+  $('sPassed').textContent = carsPassed;
+  $('pauseBtn').textContent = paused ? 'Resume' : 'Pause';
+  $('nightBtn').textContent = night ? 'Day' : 'Night';
+}
+
+document.querySelectorAll('[data-light]').forEach(b =>
+  b.addEventListener('click', () => { autoMode = false; setLight(+b.dataset.light); }));
+$('autoBtn').onclick = () => { autoMode = true; lightTimer = 0; };
+$('manualBtn').onclick = () => { autoMode = false; };
+$('addBtn').onclick = () => addCar();
+$('nightBtn').onclick = () => { night = !night; };
+$('pauseBtn').onclick = () => { paused = !paused; };
+$('resetBtn').onclick = () => { cars = []; carsPassed = 0; setLight(GREEN); autoMode = true; for (let i = 0; i < 4; i++) addCar(i % 2); };
+
+[['dg', 0, 'vg'], ['dy', 1, 'vy'], ['dr', 2, 'vr']].forEach(([id, i, out]) => {
+  $(id).oninput = e => { duration[i] = +e.target.value; $(out).textContent = e.target.value + ' s'; };
+});
+$('speed').oninput = e => { speedScale = +e.target.value; $('vs').textContent = speedScale.toFixed(1) + '×'; };
+$('density').oninput = e => { density = +e.target.value; $('vd').textContent = ['Low', 'Medium', 'High'][density - 1]; };
+
+canvas.addEventListener('click', e => {
+  const r = canvas.getBoundingClientRect();
+  const wx = (e.clientX - r.left) / r.width * W, wy = H - (e.clientY - r.top) / r.height * H;
+  if (wx > SIGNAL_X - 25 && wx < SIGNAL_X + 35 && wy > 445 && wy < 585) { autoMode = false; nextLight(); }
+});
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  const wx = (e.clientX - r.left) / r.width * W, wy = H - (e.clientY - r.top) / r.height * H;
+  canvas.style.cursor = (wx > SIGNAL_X - 25 && wx < SIGNAL_X + 35 && wy > 445 && wy < 585) ? 'pointer' : 'default';
+});
+
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'g') { autoMode = false; setLight(GREEN); }
+  else if (k === 'y') { autoMode = false; setLight(YELLOW); }
+  else if (k === 'r') { autoMode = false; setLight(RED); }
+  else if (k === 'a') { autoMode = true; lightTimer = 0; }
+  else if (k === 'n') addCar();
+  else if (k === 'd') night = !night;
+  else if (k === 'p') paused = !paused;
+  else if (k === '+' || k === '=') { speedScale = Math.min(4, speedScale + 0.5); $('speed').value = speedScale; $('speed').oninput({ target: $('speed') }); }
+  else if (k === '-') { speedScale = Math.max(0.5, speedScale - 0.5); $('speed').value = speedScale; $('speed').oninput({ target: $('speed') }); }
+});
+
+// ============================================================
+//  Main loop
+// ============================================================
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const f = dt * 60;                       // 1.0 at 60 fps
+  if (!paused) {
+    const sdt = dt * speedScale;
+    if (autoMode) { lightTimer += sdt; if (lightTimer >= duration[light]) nextLight(); }
+    spawnTimer += sdt;
+    const interval = [2.2, 1.2, 0.6][density - 1];
+    if (spawnTimer > interval) { spawnTimer = 0; if (cars.length < 18) addCar(); }
+    cloudX += 0.3 * speedScale * f;
+    updateCars(f);
+  }
+  render();
+  updateUI();
+  requestAnimationFrame(frame);
+}
+for (let i = 0; i < 4; i++) addCar(i % 2);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
